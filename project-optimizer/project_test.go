@@ -2,6 +2,7 @@ package projectoptimizer
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"strings"
@@ -26,7 +27,7 @@ func TestPruneFields(t *testing.T) {
 		},
 	}
 
-	p.pruneFields("country", "lat")
+	p.KeepFields("country", "lat")
 
 	if len(p.Fields) != 2 {
 		t.Fatalf("expected 2 fields, got %d", len(p.Fields))
@@ -244,5 +245,60 @@ func TestIterRowGroupsWithMultiplePredicates(t *testing.T) {
 			recs := readRecords(rb)
 			tc.verify(t, recs)
 		})
+	}
+}
+
+func TestProjectExecLeafProjection(t *testing.T) {
+	// open the real fixture via helper
+	f := generateDataFilter()
+	defer f.Close()
+
+	// create a leaf node that reads four columns
+	leaf := NewProjectExecLeaf(f, []string{"lat", "lon", "country", "capital"}, nil)
+
+	// ensure leaf schema has four fields
+	if len(leaf.Schema().Fields) != 4 {
+		t.Fatalf("expected leaf schema to have 4 fields, got %d", len(leaf.Schema().Fields))
+	}
+
+	// clone and keep only lat and country
+	tmp := leaf.Schema().Clone()
+	tmp.KeepFields("lat", "country")
+
+	// create an upper-level project using the cloned/pruned schema
+	proj := NewProjectExec(tmp, leaf, nil)
+
+	// call Next once and validate returned batch schema and columns
+	batch, err := proj.Next(3)
+	if err != nil {
+		// allow io.EOF (no rows) but fail on other errors
+		if err != io.EOF {
+			t.Fatalf("unexpected error from Next: %v", err)
+		}
+	}
+
+	if len(batch.Schema.Fields) != 2 {
+		t.Fatalf("expected projected schema to have 2 fields, got %d", len(batch.Schema.Fields))
+	}
+
+	// check field names are lat and country (case-insensitive)
+	names := []string{batch.Schema.Fields[0].Name, batch.Schema.Fields[1].Name}
+	want := []string{"lat", "country"}
+	for _, w := range want {
+		found := false
+		for _, n := range names {
+			if strings.EqualFold(w, n) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected projected field %q in result schema, got %v", w, names)
+		}
+	}
+
+	// ensure returned columns length matches schema
+	if len(batch.Columns) != len(batch.Schema.Fields) {
+		t.Errorf("columns length (%d) does not match schema fields (%d)", len(batch.Columns), len(batch.Schema.Fields))
 	}
 }

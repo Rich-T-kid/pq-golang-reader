@@ -29,7 +29,7 @@ type Display interface {
 	ShowSchema() string
 }
 type Operator interface {
-	Next(n uint) ([]RecordBatch, error) // read in n RecordBatches     |      return EOF when done
+	Next(n uint) (RecordBatch, error) // read in n RecordBatches     |      return EOF when done
 	Schema() *parquetSchema
 }
 
@@ -47,9 +47,17 @@ type ProjectExec struct {
 	leaf       *Leaf
 }
 
-func NewProjectExec(schema *parquetSchema, columns []string, input Operator, filter []FilterPredicate) *ProjectExec {
+func (s *parquetSchema) toColumns() []string {
+	var b []string
+	for _, field := range s.Fields {
+		b = append(b, field.Name)
+	}
+	return b
+}
+
+func NewProjectExec(schema *parquetSchema, input Operator, filter []FilterPredicate) *ProjectExec {
 	return &ProjectExec{
-		columns:    columns,
+		columns:    schema.toColumns(),
 		schema:     schema,
 		filter:     filter,
 		childInput: input,
@@ -68,12 +76,19 @@ func NewProjectExecLeaf(source *os.File, columns []string, filter []FilterPredic
 	}
 }
 
-func (p *ProjectExec) Next(n uint64) (RecordBatch, error) {
+func (p *ProjectExec) Next(n uint) (RecordBatch, error) {
+	if p.isLeaf() {
+		return p.nextLeaf(n)
+	}
+	// for non-leaf nodes, we would call child operator's Next method
+	return p.nextProject(n)
+}
+func (p *ProjectExec) nextLeaf(n uint) (RecordBatch, error) {
 	var batches = RecordBatch{
 		Schema:  *p.schema,
 		Columns: make([][]any, len(p.schema.Fields)),
 	}
-	var curSize, retries uint64
+	var curSize, retries uint
 	for curSize < n {
 		entry := reflect.New(p.Type).Interface()
 		if err := p.leaf.r.Read(entry); err != nil {
@@ -107,8 +122,36 @@ func (p *ProjectExec) Next(n uint64) (RecordBatch, error) {
 		curSize++
 	}
 	return batches, nil
-}
 
+}
+func (p *ProjectExec) nextProject(n uint) (RecordBatch, error) {
+	childrenBatch, err := p.childInput.Next(n)
+	if err != nil {
+		return RecordBatch{}, err
+	}
+	wantedSchema := p.schema
+	batches := RecordBatch{
+		Schema:  *wantedSchema,
+		Columns: make([][]any, len(wantedSchema.Fields)),
+	}
+	// only grab the selected columns from child batch
+	// map wanted columns to child schema columns
+	colIndices := make([]int, 0, len(p.columns))
+	for _, colName := range p.columns {
+		for ci, field := range childrenBatch.Schema.Fields {
+			if strings.EqualFold(colName, field.Name) {
+				colIndices = append(colIndices, ci)
+				break
+			}
+		}
+	}
+	// now extract the columns
+	for i, ci := range colIndices {
+		batches.Columns[i] = childrenBatch.Columns[ci]
+	}
+	return batches, nil
+
+}
 func (p *ProjectExec) Schema() *parquetSchema {
 	return p.schema
 }
@@ -124,7 +167,7 @@ func initPrunedReader(f *os.File, columns ...string) (*parquetSchema, reflect.Ty
 	freshReader.Close()
 
 	// Prune to requested columns
-	parsedSchema.pruneFields(columns...)
+	parsedSchema.KeepFields(columns...)
 
 	// Generate struct for reading pruned columns
 	prunedStruct, structType := genStructWithFields(parsedSchema.Fields...)
@@ -233,7 +276,7 @@ func (p *parquetSchema) existIn(fieldName string) bool {
 
 // pass in fields u want to prune
 // case insensitive
-func (p *parquetSchema) pruneFields(fieldNames ...string) {
+func (p *parquetSchema) KeepFields(fieldNames ...string) {
 	var wantedFields []structField
 	for _, name := range fieldNames {
 		for _, field := range p.Fields {
@@ -243,6 +286,13 @@ func (p *parquetSchema) pruneFields(fieldNames ...string) {
 		}
 	}
 	p.Fields = wantedFields
+}
+func (p *parquetSchema) Clone() *parquetSchema {
+	var b parquetSchema
+	for _, field := range p.Fields {
+		b.Fields = append(b.Fields, field)
+	}
+	return &b
 }
 
 // projection prune/push down
@@ -485,10 +535,10 @@ func min(a, b int) int {
 	}
 	return b
 }
-func (s parquetSchema) ShowSchema() string {
+func (p parquetSchema) ShowSchema() string {
 	var sb strings.Builder
 	sb.WriteString("Schema:\n")
-	for i, field := range s.Fields {
+	for i, field := range p.Fields {
 		sb.WriteString(fmt.Sprintf("  %d. %s: %T\n", i, field.Name, field.PqType))
 	}
 	return sb.String()

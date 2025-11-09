@@ -15,24 +15,21 @@ func handleErr(err error) {
 func main() {
 	f, err := os.Open("data/history.parquet")
 	handleErr(err)
-	projectNode := projectoptimizer.NewProjectExecLeaf(f, []string{"lat", "lon", "country", "capital"}, []projectoptimizer.FilterPredicate{
+	projectNodeLeaf := projectoptimizer.NewProjectExecLeaf(f, []string{"lat", "lon", "country", "capital"}, []projectoptimizer.FilterPredicate{
 		func(v reflect.Value) bool {
 			lat := v.FieldByName("Lat").Float()
 			return lat == -12.06
 		},
 	})
-	fmt.Fprintf(os.Stdout, "%s\n", projectNode.Schema().ShowSchema())
-	i := 1
-	for i < 5 {
-		batch, err := projectNode.Next(5)
-		if err != nil {
-			break
-		}
-		fmt.Printf("batch %d\n", i)
-		DisplayRecords(batch)
-		i++
+	tmpCopy := projectNodeLeaf.Schema().Clone()
+	tmpCopy.KeepFields("lat", "country")
+	proj := projectoptimizer.NewProjectExec(tmpCopy, projectNodeLeaf, nil)
+	fmt.Printf("schema: %v", proj.Schema().ShowSchema())
+	for range 3 {
+		records, err := proj.Next(3)
+		handleErr(err)
+		DisplayRecords(records)
 	}
-	fmt.Printf("Done reading in batches\n")
 
 }
 
