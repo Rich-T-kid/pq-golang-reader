@@ -15,26 +15,30 @@ func handleErr(err error) {
 func main() {
 	f, err := os.Open("data/history.parquet")
 	handleErr(err)
-	r1 := projectoptimizer.IterRowGroupsWithPrune(f, "country", "lat", "lon", "date", "temp_mean_c_approx")
-	r2 := projectoptimizer.IterRowGroupsWithPruneFilter(f, []string{"country", "lat", "lon", "date", "temp_mean_c_approx"}, func(v reflect.Value) bool {
-		lon := v.FieldByName("Lon").Float()
-		return lon > 19
+	projectNode := projectoptimizer.NewProjectExecLeaf(f, []string{"lat", "lon", "country", "capital"}, []projectoptimizer.FilterPredicate{
+		func(v reflect.Value) bool {
+			lat := v.FieldByName("Lat").Float()
+			return lat == -12.06
+		},
 	})
-	readRecords(r1)
-	fmt.Printf("\n\n")
-	readRecords(r2)
+	fmt.Fprintf(os.Stdout, "%s\n", projectNode.Schema().ShowSchema())
+	i := 1
+	for i < 5 {
+		batch, err := projectNode.Next(5)
+		if err != nil {
+			break
+		}
+		fmt.Printf("batch %d\n", i)
+		DisplayRecords(batch)
+		i++
+	}
+	fmt.Printf("Done reading in batches\n")
 
 }
 
-func readRecords(r *projectoptimizer.RecordBatch) {
-	fmt.Printf("record Schmea %v\n", r.Schema)
-	for i, col := range r.Columns {
-		recordSchema := r.Schema.Fields[i]
-		name := recordSchema.Name
-		Type := recordSchema.PqType
-		fmt.Printf("column: %s | type: %v | values : %v\n", name, Type, col)
-	}
-
+func DisplayRecords(displayer projectoptimizer.Display) {
+	fmt.Fprintf(os.Stdout, "%s", displayer.Show())
+	fmt.Println()
 }
 
 /*
