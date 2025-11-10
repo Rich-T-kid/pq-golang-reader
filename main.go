@@ -24,13 +24,9 @@ func main() {
 	tmpCopy := projectNodeLeaf.Schema().Clone()
 	tmpCopy.KeepFields("lat", "country")
 	proj := projectoptimizer.NewProjectExec(tmpCopy, projectNodeLeaf, nil)
-	fmt.Printf("schema: %v", proj.Schema().ShowSchema())
-	for range 3 {
-		records, err := proj.Next(3)
-		handleErr(err)
-		DisplayRecords(records)
-	}
-
+	sumExec, err := projectoptimizer.NewSumExec(proj, "lat")
+	handleErr(err)
+	fmt.Printf("schema: %v", sumExec.Schema().ShowSchema())
 }
 
 func DisplayRecords(displayer projectoptimizer.Display) {

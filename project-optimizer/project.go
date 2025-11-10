@@ -54,6 +54,14 @@ func (s *parquetSchema) toColumns() []string {
 	}
 	return b
 }
+func (s *parquetSchema) ColumnInfo(column string) (structField, error) {
+	for _, field := range s.Fields {
+		if strings.EqualFold(field.Name, column) {
+			return field, nil
+		}
+	}
+	return structField{}, fmt.Errorf("column %s not found in schema", column)
+}
 
 func NewProjectExec(schema *parquetSchema, input Operator, filter []FilterPredicate) *ProjectExec {
 	return &ProjectExec{
