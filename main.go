@@ -12,9 +12,9 @@ func handleErr(err error) {
 	}
 }
 func main() {
-	f, err := os.Open("data/tmp.parquet")
+	f, err := os.Open("data/history.parquet")
 	handleErr(err)
-	projectoptimizer.ArrowTest(f)
+	projectoptimizer.ReadRecordBatch(f, []string{"lat", "lon"})
 	/*
 	   	projectNodeLeaf := projectoptimizer.NewProjectExecLeaf(f, []string{"lat", "lon", "country", "capital"}, []projectoptimizer.FilterPredicate{
 	   		func(v reflect.Value) bool {
