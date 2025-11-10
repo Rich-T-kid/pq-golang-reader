@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	projectoptimizer "parqlite/project-optimizer"
-	"reflect"
 )
 
 func handleErr(err error) {
@@ -13,20 +12,24 @@ func handleErr(err error) {
 	}
 }
 func main() {
-	f, err := os.Open("data/history.parquet")
+	f, err := os.Open("data/tmp.parquet")
 	handleErr(err)
-	projectNodeLeaf := projectoptimizer.NewProjectExecLeaf(f, []string{"lat", "lon", "country", "capital"}, []projectoptimizer.FilterPredicate{
-		func(v reflect.Value) bool {
-			lat := v.FieldByName("Lat").Float()
-			return lat == -12.06
-		},
-	})
-	tmpCopy := projectNodeLeaf.Schema().Clone()
-	tmpCopy.KeepFields("lat", "country")
-	proj := projectoptimizer.NewProjectExec(tmpCopy, projectNodeLeaf, nil)
-	sumExec, err := projectoptimizer.NewSumExec(proj, "lat")
-	handleErr(err)
-	fmt.Printf("schema: %v", sumExec.Schema().ShowSchema())
+	projectoptimizer.ArrowTest(f)
+	/*
+	   	projectNodeLeaf := projectoptimizer.NewProjectExecLeaf(f, []string{"lat", "lon", "country", "capital"}, []projectoptimizer.FilterPredicate{
+	   		func(v reflect.Value) bool {
+	   			lat := v.FieldByName("Lat").Float()
+	   			return lat == -12.06
+	   		},
+	   	})
+
+	   tmpCopy := projectNodeLeaf.Schema().Clone()
+	   tmpCopy.KeepFields("lat", "country")
+	   proj := projectoptimizer.NewProjectExec(tmpCopy, projectNodeLeaf, nil)
+	   sumExec, err := projectoptimizer.NewSumExec(proj, "lat")
+	   handleErr(err)
+	   fmt.Printf("schema: %v", sumExec.Schema().ShowSchema())
+	*/
 }
 
 func DisplayRecords(displayer projectoptimizer.Display) {
